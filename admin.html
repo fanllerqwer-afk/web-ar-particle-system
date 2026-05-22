@@ -1,0 +1,228 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调试面板 - 手势光粒子</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0d1a;color:#ccc;font-family:"Segoe UI",system-ui,monospace;overflow:hidden;height:100vh;display:flex}
+.sidebar{width:320px;background:#111122;padding:20px;overflow-y:auto;border-right:1px solid #222;display:flex;flex-direction:column;gap:16px}
+.sidebar h2{font-size:15px;font-weight:600;color:#fff;letter-spacing:2px;border-bottom:1px solid #333;padding-bottom:8px}
+.sidebar label{font-size:11px;color:#888;letter-spacing:1px;text-transform:uppercase}
+.sidebar input[type=range]{width:100%;accent-color:#8844ff}
+.sidebar .val{font-size:13px;color:#fff;float:right}
+.sidebar .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.sidebar .row .key{font-size:11px;color:#666}.sidebar .row .val{font-size:13px;color:#fff;font-weight:600}
+.main{flex:1;display:flex;align-items:center;justify-content:center;position:relative;background:#000}
+#camCanvas{max-width:100%;max-height:100vh;transform:scaleX(-1)}
+.gesture-badge{position:absolute;top:20px;left:50%;transform:translateX(-50%);font-size:36px;font-weight:300;letter-spacing:4px;color:#fff;text-shadow:0 0 30px rgba(255,255,255,.6);transition:all .3s}
+.status-indicator{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:16px}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot.red{background:#ff4444;box-shadow:0 0 12px #ff4444}
+.dot.green{background:#00ff88;box-shadow:0 0 20px #00ff88}
+.toggle-btn{padding:8px 20px;background:#8844ff22;border:1px solid #8844ff55;color:#fff;border-radius:6px;cursor:pointer;font-size:12px;letter-spacing:1px;transition:all .2s}
+.toggle-btn:hover{background:#8844ff44}
+.toggle-btn.active{background:#8844ff88;border-color:#8844ff}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <h2>🔧 手势调试面板</h2>
+  <div class="row"><span class="key">检测置信度</span><span class="val" id="detConf">--</span></div>
+  <div class="row"><span class="key">跟踪置信度</span><span class="val" id="trkConf">--</span></div>
+  <div class="row"><span class="key">检测手数</span><span class="val" id="handCount">0</span></div>
+  <div class="row"><span class="key">帧率</span><span class="val" id="fpsVal">0</span></div>
+
+  <h2>🎯 当前手势</h2>
+  <div class="row"><span class="key">手势名称</span><span class="val" id="gName">--</span></div>
+  <div class="row"><span class="key">命令状态</span><span class="val" id="gState">--</span></div>
+  <div class="row"><span class="key">置信度</span><span class="val" id="gConf">--</span></div>
+
+  <h2>👆 指尖坐标 (手1)</h2>
+  <div id="tipCoords">
+    <div class="row"><span class="key">拇指</span><span class="val">--</span></div>
+    <div class="row"><span class="key">食指</span><span class="val">--</span></div>
+    <div class="row"><span class="key">中指</span><span class="val">--</span></div>
+    <div class="row"><span class="key">无名指</span><span class="val">--</span></div>
+    <div class="row"><span class="key">小指</span><span class="val">--</span></div>
+  </div>
+
+  <h2>📏 关键距离</h2>
+  <div class="row"><span class="key">拇-食距</span><span class="val" id="pinchDist">--</span></div>
+  <div class="row"><span class="key">握拳指数</span><span class="val" id="fistIdx">--</span></div>
+  <div class="row"><span class="key">张开指数</span><span class="val" id="openIdx">--</span></div>
+
+  <h2>⚙️ 阈值</h2>
+  <label>检测置信度下限</label>
+  <input type="range" id="minDet" min="30" max="90" value="65" step="5">
+  <div class="row"><span class="key">当前</span><span class="val" id="minDetVal">0.65</span></div>
+
+  <label>跟踪置信度下限</label>
+  <input type="range" id="minTrk" min="20" max="80" value="45" step="5">
+  <div class="row"><span class="key">当前</span><span class="val" id="minTrkVal">0.45</span></div>
+
+  <label>捏合阈值 (像素)</label>
+  <input type="range" id="pinchThresh" min="20" max="80" value="40" step="5">
+  <div class="row"><span class="key">当前</span><span class="val" id="pinchThreshVal">40</span></div>
+
+  <button class="toggle-btn active" id="showLandmarks" onclick="toggleLM()">显示关键点 ✓</button>
+  <button class="toggle-btn active" id="showSkeleton" onclick="toggleSK()">显示骨架 ✓</button>
+  <button class="toggle-btn active" id="mirrorCam" onclick="toggleMirror()">镜像翻转 ✓</button>
+</div>
+
+<div class="main">
+  <div class="gesture-badge" id="gestureBadge">等待手势...</div>
+  <canvas id="camCanvas"></canvas>
+  <div class="status-indicator">
+    <div class="dot red" id="statusDot"></div>
+    <span style="font-size:12px;color:#888" id="statusMsg">初始化中</span>
+  </div>
+</div>
+
+<video id="video" autoplay playsinline muted style="display:none"></video>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const camCanvas=document.getElementById("camCanvas"),camCtx=camCanvas.getContext("2d");
+let W=640,H=480;
+camCanvas.width=W;camCanvas.height=H;
+
+let showLM=true,showSK=true,mirror=true;
+let handData=null,lastGesture={name:"--",state:"--",confidence:0};
+let fpsFrames=0,fpsTime=performance.now(),fps=0;
+let minDetConf=.65,minTrkConf=.45,pinchThreshold=40;
+let hi=null;
+
+const tips=[4,8,12,16,20],tipNames=["拇指","食指","中指","无名指","小指"];
+const mcps=[2,5,9,13,17];
+const conns=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+function d2(x1,y1,x2,y2){return Math.sqrt((x1-x2)**2+(y1-y2)**2)}
+
+function detectGesture(lm){
+  if(!lm||lm.length<21)return{name:"无",state:"neutral",confidence:0};
+  let fs=0,os=0;
+  for(let i=0;i<5;i++){if(lm[tips[i]].y>lm[mcps[i]].y)fs++;if(lm[tips[i]].y<lm[mcps[i]].y-18)os++}
+  const fc=fs/5,oc=os/5;
+  const pd=d2(lm[4].x,lm[4].y,lm[8].x,lm[8].y),pc=pd<pinchThreshold?Math.max(0,1-pd/pinchThreshold):0;
+  const iu=lm[8].y<lm[5].y-28,od=lm[12].y>lm[9].y&&lm[16].y>lm[13].y&&lm[20].y>lm[17].y,ptc=iu&&od?.9:0;
+  const pu=lm[8].y<lm[5].y-18&&lm[12].y<lm[9].y-18,po=lm[16].y>lm[13].y&&lm[20].y>lm[17].y,pec=pu&&po?.85:0;
+
+  if(pc>.55)return{name:"捏合 🤏",state:"vortex",confidence:pc};
+  if(fc>.65)return{name:"握拳 ✊",state:"contract",confidence:fc};
+  if(pec>.65)return{name:"剪刀手 ✌️",state:"shield",confidence:pec};
+  if(ptc>.65)return{name:"指向 ☝️",state:"beam",confidence:ptc};
+  if(oc>.65)return{name:"张开手掌 ✋",state:"expand",confidence:oc};
+  return{name:"手部追踪",state:"neutral",confidence:.45};
+}
+
+function onResults(r){
+  fpsFrames++;const now=performance.now();if(now-fpsTime>=1000){fps=fpsFrames;fpsFrames=0;fpsTime=now}
+
+  camCtx.clearRect(0,0,W,H);
+
+  // 绘制视频
+  if(r.image){
+    camCtx.save();
+    if(mirror){camCtx.translate(W,0);camCtx.scale(-1,1)}
+    camCtx.drawImage(r.image,0,0,W,H);
+    camCtx.restore();
+  }
+
+  if(r.multiHandLandmarks&&r.multiHandLandmarks.length>0){
+    handData=r.multiHandLandmarks.map((lm,i)=>({
+      landmarks:lm.map(l=>({x:l.x*W,y:l.y*H,z:l.z})),
+      handedness:r.multiHandedness[i]?.label||"?"
+    }));
+
+    const lm=handData[0].landmarks;
+    const mlm=mirror?lm.map(l=>({...l,x:W-l.x})):lm;
+    const g=detectGesture(lm);
+    lastGesture=g;
+
+    // 绘制骨架
+    if(showSK){
+      camCtx.strokeStyle="#00ff88";camCtx.lineWidth=2;camCtx.globalAlpha=.7;
+      camCtx.beginPath();
+      for(const[a,b]of conns){camCtx.moveTo(mlm[a].x,mlm[a].y);camCtx.lineTo(mlm[b].x,mlm[b].y)}
+      camCtx.stroke();camCtx.globalAlpha=1;
+    }
+
+    // 绘制关键点
+    if(showLM){
+      for(let i=0;i<mlm.length;i++){
+        const p=mlm[i],isTip=tips.includes(i);
+        camCtx.beginPath();camCtx.arc(p.x,p.y,isTip?8:4,0,Math.PI*2);
+        camCtx.fillStyle=isTip?"#ff4488":"#44aaff";
+        camCtx.globalAlpha=.85;camCtx.fill();
+        camCtx.strokeStyle="#fff";camCtx.lineWidth=1.5;
+        camCtx.stroke();
+      }
+      camCtx.globalAlpha=1;
+    }
+
+    // 更新UI
+    document.getElementById("handCount").textContent=r.multiHandLandmarks.length;
+    document.getElementById("gName").textContent=g.name;
+    document.getElementById("gState").textContent=g.state;
+    document.getElementById("gConf").textContent=g.confidence.toFixed(2);
+    document.getElementById("pinchDist").textContent=d2(lm[4].x,lm[4].y,lm[8].x,lm[8].y).toFixed(0)+"px";
+
+    let fs=0,os=0;for(let i=0;i<5;i++){if(lm[tips[i]].y>lm[mcps[i]].y)fs++;if(lm[tips[i]].y<lm[mcps[i]].y-18)os++}
+    document.getElementById("fistIdx").textContent=(fs/5*100).toFixed(0)+"%";
+    document.getElementById("openIdx").textContent=(os/5*100).toFixed(0)+"%";
+
+    const tc=document.getElementById("tipCoords");
+    tc.innerHTML=tips.map((t,i)=>`<div class="row"><span class="key">${tipNames[i]}</span><span class="val">(${lm[t].x.toFixed(0)}, ${lm[t].y.toFixed(0)})</span></div>`).join("");
+
+    document.getElementById("gestureBadge").textContent=g.name;
+    document.getElementById("gestureBadge").style.color=g.state==="neutral"?"#888":"#fff";
+
+    document.getElementById("statusDot").className="dot green";
+    document.getElementById("statusMsg").textContent="追踪中";
+    document.getElementById("detConf").textContent=(r.multiHandLandmarks?">="+minDetConf.toFixed(2):"无").toString();
+    document.getElementById("trkConf").textContent=">="+minTrkConf.toFixed(2);
+  }else{
+    handData=null;
+    document.getElementById("handCount").textContent="0";
+    document.getElementById("gName").textContent="无";
+    document.getElementById("gState").textContent="--";
+    document.getElementById("gConf").textContent="--";
+    document.getElementById("gestureBadge").textContent="未检测到手部";
+    document.getElementById("gestureBadge").style.color="#888";
+    document.getElementById("statusDot").className="dot red";
+    document.getElementById("statusMsg").textContent="检测中...";
+  }
+
+  document.getElementById("fpsVal").textContent=fps;
+}
+
+async function initHands(){
+  const Hands=window.Hands;
+  hi=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  hi.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:minDetConf,minTrackingConfidence:minTrkConf});
+  hi.onResults(onResults);
+
+  const v=document.getElementById("video");
+  v.srcObject=await navigator.mediaDevices.getUserMedia({video:{width:W,height:H,facingMode:"user"}});
+  (function lp(){if(v.readyState>=2)hi.send({image:v});requestAnimationFrame(lp)})();
+  document.getElementById("statusMsg").textContent="就绪";
+}
+
+function toggleLM(){showLM=!showLM;document.getElementById("showLandmarks").classList.toggle("active",showLM);document.getElementById("showLandmarks").textContent="显示关键点 "+(showLM?"✓":"✗")}
+function toggleSK(){showSK=!showSK;document.getElementById("showSkeleton").classList.toggle("active",showSK);document.getElementById("showSkeleton").textContent="显示骨架 "+(showSK?"✓":"✗")}
+function toggleMirror(){mirror=!mirror;document.getElementById("mirrorCam").classList.toggle("active",mirror);document.getElementById("mirrorCam").textContent="镜像翻转 "+(mirror?"✓":"✗")}
+
+// 阈值滑块
+document.getElementById("minDet").addEventListener("input",function(){minDetConf=this.value/100;document.getElementById("minDetVal").textContent=minDetConf.toFixed(2);if(hi)hi.setOptions({minDetectionConfidence:minDetConf})});
+document.getElementById("minTrk").addEventListener("input",function(){minTrkConf=this.value/100;document.getElementById("minTrkVal").textContent=minTrkConf.toFixed(2);if(hi)hi.setOptions({minTrackingConfidence:minTrkConf})});
+document.getElementById("pinchThresh").addEventListener("input",function(){pinchThreshold=parseInt(this.value);document.getElementById("pinchThreshVal").textContent=pinchThreshold});
+
+initHands();
+</script>
+</body>
+</html>
+

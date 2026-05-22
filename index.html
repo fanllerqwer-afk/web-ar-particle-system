@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>粒子特效 · WebAR 手势互动系统</title>
+<meta name="description" content="基于 Three.js + MediaPipe Hands 的 WebAR 粒子互动系统，支持五态手势识别、挥手风暴、深度推拉等交互特效">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{background:#000a14;color:#c8e6ff;font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;min-height:100vh;overflow-x:hidden}
+::selection{background:#00e5ff44;color:#fff}
+canvas#bg{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* ===== NAV ===== */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:16px 32px;display:flex;justify-content:space-between;align-items:center;background:rgba(0,10,20,0.8);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid rgba(0,229,255,0.08)}
+nav .logo{font-size:20px;font-weight:700;letter-spacing:2px;color:#00e5ff;text-decoration:none}
+nav .logo span{font-weight:300;color:#fff;margin-left:4px}
+nav a{color:#8899aa;text-decoration:none;font-size:14px;margin-left:24px;transition:color .2s}
+nav a:hover{color:#00e5ff}
+
+/* ===== HERO ===== */
+.hero{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:100px 24px 60px;text-align:center}
+.hero .badge{display:inline-block;padding:6px 18px;border:1px solid rgba(0,229,255,0.3);border-radius:20px;font-size:13px;color:#00e5ff;letter-spacing:1px;margin-bottom:24px;background:rgba(0,229,255,0.05)}
+.hero h1{font-size:clamp(36px,8vw,72px);font-weight:700;letter-spacing:3px;line-height:1.2;margin-bottom:16px}
+.hero h1 .cyan{color:#00e5ff}
+.hero h1 .white{color:#fff}
+.hero .sub{font-size:clamp(16px,2.5vw,20px);color:#667788;letter-spacing:1px;max-width:600px;margin-bottom:40px;line-height:1.6}
+.hero .features{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:48px}
+.hero .features span{padding:8px 16px;background:rgba(0,229,255,0.06);border:1px solid rgba(0,229,255,0.15);border-radius:8px;font-size:13px;color:#88bbdd;letter-spacing:.5px}
+.hero .cta{display:inline-flex;align-items:center;gap:10px;padding:16px 48px;background:linear-gradient(135deg,#006680,#00aacc);color:#fff;font-size:18px;font-weight:600;letter-spacing:2px;border:none;border-radius:50px;cursor:pointer;text-decoration:none;transition:all .3s;box-shadow:0 0 40px rgba(0,229,255,0.2)}
+.hero .cta:hover{transform:translateY(-2px);box-shadow:0 0 60px rgba(0,229,255,0.35)}
+
+/* ===== DEMOS ===== */
+.demos{position:relative;z-index:1;padding:60px 32px 100px;max-width:1200px;margin:0 auto}
+.demos h2{text-align:center;font-size:28px;font-weight:600;letter-spacing:2px;margin-bottom:12px;color:#fff}
+.demos .subtitle{text-align:center;color:#556677;font-size:15px;margin-bottom:48px;letter-spacing:1px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:24px}
+.card{background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.1);border-radius:16px;overflow:hidden;transition:all .3s;text-decoration:none;display:block;color:inherit}
+.card:hover{transform:translateY(-4px);border-color:rgba(0,229,255,0.3);box-shadow:0 20px 60px rgba(0,0,0,0.4),0 0 40px rgba(0,229,255,0.08)}
+.card .thumb{height:200px;background:linear-gradient(135deg,#001020,#002040);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.card .thumb .icon{font-size:64px;opacity:0.6;transition:all .3s}
+.card:hover .thumb .icon{opacity:1;transform:scale(1.1)}
+.card .thumb::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,229,255,0.08) 0%,transparent 70%)}
+.card.featured .thumb{background:linear-gradient(135deg,#001a30,#003050)}
+.card.featured{border-color:rgba(0,229,255,0.25)}
+.card .body{padding:24px}
+.card .body h3{font-size:18px;font-weight:600;color:#fff;margin-bottom:8px;letter-spacing:1px}
+.card .body p{font-size:14px;color:#667788;line-height:1.6;margin-bottom:12px}
+.card .body .tags{display:flex;flex-wrap:wrap;gap:6px}
+.card .body .tags span{font-size:11px;padding:4px 10px;background:rgba(0,229,255,0.08);color:#5599aa;border-radius:4px;letter-spacing:.5px}
+.card.featured .body .tags span{background:rgba(0,229,255,0.12);color:#00ccdd}
+.card .badge-new{position:absolute;top:16px;right:16px;padding:4px 12px;background:#00e5ff;color:#000;font-size:11px;font-weight:700;border-radius:8px;letter-spacing:1px;z-index:2}
+
+/* ===== FOOTER ===== */
+footer{position:relative;z-index:1;text-align:center;padding:40px 24px;border-top:1px solid rgba(0,229,255,0.08);color:#445566;font-size:13px;letter-spacing:1px}
+
+@media(max-width:768px){
+  nav{padding:12px 16px}
+  nav a{display:none}
+  .demos{padding:40px 16px 60px}
+  .grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<nav>
+  <a href="/" class="logo">✦<span>粒子特效</span></a>
+  <div>
+    <a href="https://github.com">GitHub</a>
+    <a href="admin.html">调试面板</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="badge">WebAR · Three.js · MediaPipe</div>
+  <h1><span class="white">手势驱动</span><br><span class="cyan">粒子互动系统</span></h1>
+  <p class="sub">16,000 颗青色流体粒子实时响应你的手势变化，五态变形、挥手风暴、深度推拉，带来极致丝滑的物理交互体验</p>
+  <div class="features">
+    <span>🖐 张手 → 球体</span>
+    <span>✌️ 剪刀 → 文字</span>
+    <span>✊ 握拳 → 圆环</span>
+    <span>☝️ 食指 → 星形</span>
+    <span>👍 拇指 → 爱心</span>
+  </div>
+  <a href="particle-webar.html" class="cta">✨ 立即体验</a>
+</section>
+
+<section class="demos">
+  <h2>体验项目</h2>
+  <p class="subtitle">选择你想体验的互动模式</p>
+  <div class="grid">
+    <a href="particle-webar.html" class="card featured">
+      <div class="thumb">
+        <span class="badge-new">NEW</span>
+        <span class="icon">🧊</span>
+      </div>
+      <div class="body">
+        <h3>粒子特效 WebAR</h3>
+        <p>基于 Three.js + MediaPipe Hands 的完整 WebAR 体验，16,000 粒子物理引擎，五态手势变形、爆炸过渡、挥手风暴</p>
+        <div class="tags">
+          <span>Three.js</span><span>MediaPipe</span><span>WebGL</span><span>物理引擎</span>
+        </div>
+      </div>
+    </a>
+    <a href="hand-particles-2d.html" class="card">
+      <div class="thumb">
+        <span class="icon">✨</span>
+      </div>
+      <div class="body">
+        <h3>手势光粒子 2D</h3>
+        <p>轻量级 2D Canvas 粒子系统，肤色检测驱动，无需加载模型即可体验手势追踪粒子的魅力</p>
+        <div class="tags">
+          <span>Canvas 2D</span><span>肤色检测</span><span>轻量</span>
+        </div>
+      </div>
+    </a>
+    <a href="admin.html" class="card">
+      <div class="thumb">
+        <span class="icon">🔧</span>
+      </div>
+      <div class="body">
+        <h3>调试面板</h3>
+        <p>实时查看 MediaPipe 手势识别数据，包括指尖坐标、关键距离、置信度等调试信息</p>
+        <div class="tags">
+          <span>调试</span><span>MediaPipe</span><span>数据可视化</span>
+        </div>
+      </div>
+    </a>
+  </div>
+</section>
+
+<footer>
+  <p>Made with Three.js & MediaPipe Hands · 粒子特效 WebAR 互动系统</p>
+</footer>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}
+</script>
+<script type="module">
+import * as THREE from "three";
+
+// Background particle effect
+const bgCanvas=document.getElementById("bg");
+const renderer=new THREE.WebGLRenderer({canvas:bgCanvas,antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.5,30);
+camera.position.z=8;
+
+const N=600;
+const geom=new THREE.BufferGeometry();
+const pos=new Float32Array(N*3);
+const vel=new Float32Array(N*3);
+for(let i=0;i<N;i++){
+  pos[i*3]=(Math.random()-0.5)*20;pos[i*3+1]=(Math.random()-0.5)*14;pos[i*3+2]=(Math.random()-0.5)*6;
+  vel[i*3]=(Math.random()-0.5)*0.003;vel[i*3+1]=(Math.random()-0.5)*0.003;vel[i*3+2]=(Math.random()-0.5)*0.002;
+}
+geom.setAttribute("position",new THREE.BufferAttribute(pos,3));
+
+const mat=new THREE.PointsMaterial({
+  color:0x00aacc,size:0.04,transparent:true,opacity:0.5,
+  blending:THREE.AdditiveBlending,depthWrite:false
+});
+const points=new THREE.Points(geom,mat);
+scene.add(points);
+
+function animate(t){
+  requestAnimationFrame(animate);
+  for(let i=0;i<N;i++){
+    pos[i*3]+=vel[i*3];pos[i*3+1]+=vel[i*3+1];
+    if(Math.abs(pos[i*3])>10)vel[i*3]*=-1;if(Math.abs(pos[i*3+1])>7)vel[i*3+1]*=-1;
+  }
+  geom.attributes.position.needsUpdate=true;
+  points.rotation.y+=0.0003;
+  points.rotation.x+=0.0001;
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+window.addEventListener("resize",()=>{
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+// Parallax on mouse move
+document.addEventListener("mousemove",e=>{
+  const x=(e.clientX/innerWidth-0.5)*0.5;
+  const y=(e.clientY/innerHeight-0.5)*0.3;
+  camera.position.x+=(x-camera.position.x)*0.02;
+  camera.position.y+=(-y-camera.position.y)*0.02;
+  camera.lookAt(0,0,0);
+});
+</script>
+</body>
+</html>

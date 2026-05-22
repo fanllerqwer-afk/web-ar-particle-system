@@ -1,0 +1,208 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手势光粒子</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden}
+canvas{display:block;position:fixed;top:0;left:0;z-index:1}
+#thc{display:none}
+#msg{position:fixed;z-index:10;top:20px;left:50%;transform:translateX(-50%);color:#fff;font-size:14px;letter-spacing:1px;pointer-events:none;text-align:center;text-shadow:0 0 15px rgba(255,255,255,.4);white-space:nowrap}
+#dot{position:fixed;z-index:10;bottom:20px;left:50%;transform:translateX(-50%);width:12px;height:12px;border-radius:50%;background:red;box-shadow:0 0 12px red;transition:all .4s}
+#dot.on{background:#0f0;box-shadow:0 0 24px #0f0}
+#btn{position:fixed;z-index:20;top:50%;left:50%;transform:translate(-50%,-50%);padding:20px 56px;background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;font-size:18px;letter-spacing:3px;cursor:pointer;border-radius:50px;transition:all .4s}
+#btn:hover{border-color:#fff;box-shadow:0 0 40px rgba(255,255,255,.1)}
+#btn.off{opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="vid" autoplay playsinline muted style="position:fixed;bottom:10px;right:10px;width:160px;height:120px;border:1px solid rgba(255,255,255,.15);border-radius:4px;z-index:5;transform:scaleX(-1)"></video>
+<canvas id="thc" width="160" height="120"></canvas>
+<div id="msg">手势光粒子</div>
+<div id="dot"></div>
+<button id="btn" onclick="go()">✨ 开始体验</button>
+
+<script>
+// ============ 主渲染 ============
+var c=document.getElementById("c"),ctx=c.getContext("2d");
+var thc=document.getElementById("thc"),thx=thc.getContext("2d");
+var W,H,pts=[],time=0;
+var PI2=Math.PI*2;
+function rs(){W=c.width=innerWidth;H=c.height=innerHeight}rs();addEventListener("resize",rs);
+function lerp(a,b,t){return a+(b-a)*t}
+
+// ============ 粒子 ============
+function Pt(x,y){
+  this.x=x!=null?x:Math.random()*W;this.y=y!=null?y:Math.random()*H;
+  this.vx=(Math.random()-.5)*.3;this.vy=(Math.random()-.5)*.3;
+  this.r=Math.random()*4+2;this.c=["#ff4488","#44aaff","#ffaa44","#fff"][0|Math.random()*4];
+  this.a=Math.random()*.5+.3;this.l=Math.random()*400+250;this.ml=this.l;
+  this.pl=Math.random()*PI2;this.ps=Math.random()*.02+.008;
+  this.oa=Math.random()*PI2;this.or=40+Math.random()*160;
+  this.nx=Math.random()*1000;this.ny=Math.random()*1000;
+}
+Pt.prototype.up=function(sw,atrs){
+  this.l--;this.pl+=this.ps;this.oa+=.006;
+  var sx=sw.x,sy=sw.y,tr=this.or*(.7+Math.sin(this.pl)*.3);
+  var tx=sx+Math.cos(this.oa)*tr,ty=sy+Math.sin(this.oa)*tr;
+  this.vx+=(tx-this.x)*.015;this.vy+=(ty-this.y)*.015;
+  this.vx+=(Math.sin(this.nx+time*.25)*2-1)*.02;this.vy+=(Math.cos(this.ny+time*.3)*2-1)*.02;
+  if(atrs.length>0){
+    for(var i=0;i<atrs.length;i++){
+      var a=atrs[i],dx=a.x-this.x,dy=a.y-this.y,d=Math.sqrt(dx*dx+dy*dy)||1,f=a.s/(d*.25+1)*.1;
+      this.vx+=dx/d*f;this.vy+=dy/d*f;
+    }
+  }
+  this.vx*=.988;this.vy*=.988;
+  var sp=Math.sqrt(this.vx*this.vx+this.vy*this.vy);if(sp>2){this.vx*=2/sp;this.vy*=2/sp}
+  this.x+=this.vx;this.y+=this.vy;
+  if(this.x<-80)this.x=W+80;if(this.x>W+80)this.x=-80;if(this.y<-80)this.y=H+80;if(this.y>H+80)this.y=-80;
+};
+Pt.prototype.dr=function(ctx){
+  var lr=this.l/this.ml,al=this.a*lr,r=this.r*(.6+Math.sin(this.pl)*.4+.4);
+  if(al<.01)return;
+  var g=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,r*4);
+  g.addColorStop(0,this.c);g.addColorStop(.3,this.c);g.addColorStop(1,"transparent");
+  ctx.beginPath();ctx.arc(this.x,this.y,r*4,0,PI2);ctx.fillStyle=g;ctx.globalAlpha=al*.5;ctx.fill();
+  var cr=ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,r);
+  cr.addColorStop(0,"#fff");cr.addColorStop(.4,this.c);cr.addColorStop(1,"transparent");
+  ctx.beginPath();ctx.arc(this.x,this.y,r,0,PI2);ctx.fillStyle=cr;ctx.globalAlpha=al;ctx.fill();
+  ctx.globalAlpha=1;
+};
+
+// ============ 肤色检测 ============
+// 返回 {handX, handY, handSize, fingers, gesture}
+var hand={x:0,y:0,size:0,fingers:0,smoothX:0,smoothY:0,smoothSize:0};
+
+function isSkin(r,g,b){
+  // YCrCb 肤色范围（对各种肤色和光照较鲁棒）
+  var y=0.299*r+0.587*g+0.114*b;
+  var cr=(r-y)*0.713+128;
+  var cb=(b-y)*0.564+128;
+  return cr>=133&&cr<=173&&cb>=77&&cb<=127;
+}
+
+function analyzeHand(){
+  var v=document.getElementById("vid");
+  if(v.readyState<2)return false;
+  thx.drawImage(v,0,0,160,120);
+  var data=thx.getImageData(0,0,160,120).data;
+
+  // 收集肤色像素
+  var sx=0,sy=0,sc=0;
+  var minX=160,maxX=0,minY=120,maxY=0;
+
+  // 下采样扫描（每2px采样一次，提高性能）
+  for(var y=0;y<120;y+=2){
+    for(var x=0;x<160;x+=2){
+      var i=(y*160+x)*4;
+      var r=data[i],g=data[i+1],b=data[i+2];
+      if(isSkin(r,g,b)){
+        sx+=x;sy+=y;sc++;
+        if(x<minX)minX=x;if(x>maxX)maxX=x;
+        if(y<minY)minY=y;if(y>maxY)maxY=y;
+      }
+    }
+  }
+
+  if(sc<80)return false; // 肤色像素太少=没有手
+
+  // 计算手部中心和大小
+  var cx=sx/sc,cy=sy/sc;
+  var bw=maxX-minX,bh=maxY-minY;
+  var size=Math.max(bw,bh);
+
+  // 映射到全屏坐标
+  hand.smoothX=lerp(hand.smoothX||cx/160*W, cx/160*W, .3);
+  hand.smoothY=lerp(hand.smoothY||cy/120*H, cy/120*H, .3);
+  hand.smoothSize=lerp(hand.smoothSize||size, size, .3);
+  hand.x=hand.smoothX;
+  hand.y=hand.smoothY;
+  hand.size=hand.smoothSize;
+
+  // 通过手部区域占比估算手指数量（简化版）
+  var aspect=bw/Math.max(bh,1);
+  if(size>80)hand.fingers=5;      // 大手=张开
+  else if(size>50)hand.fingers=3;  // 中等=部分握拳
+  else if(size>25)hand.fingers=1;  // 小手=握拳
+  else hand.fingers=0;
+
+  return true;
+}
+
+// ============ 手势命名 ============
+function gestureName(f,sz){
+  if(sz>85)return"✋ 张开";
+  if(sz>55)return"✌️ 剪刀手";
+  if(sz>30)return"☝️ 指向";
+  if(sz>15)return"✊ 握拳";
+  return"👋 追踪";
+}
+
+// ============ 主循环 ============
+var sw={x:0,y:0},gdbg="检测中...",handDetected=false;
+function anim(){
+  requestAnimationFrame(anim);time+=.016;
+
+  // 肤色检测（每3帧一次以优化性能）
+  if(time*60%3<1){
+    handDetected=analyzeHand();
+    if(handDetected){
+      gdbg=gestureName(hand.fingers,hand.size);
+      document.getElementById("dot").classList.add("on");
+    }else{
+      document.getElementById("dot").classList.remove("on");
+    }
+    document.getElementById("msg").textContent=gdbg+" | 手部:"+hand.size.toFixed(0)+"px";
+  }
+
+  sw.x=lerp(sw.x,W/2+Math.cos(time*.15)*W*.25,.008);
+  sw.y=lerp(sw.y,H/2+Math.sin(time*.2)*H*.25,.008);
+
+  var atrs=[];
+  if(handDetected&&hand.size>10){
+    // 根据手势调整吸引力
+    var s=4;
+    if(hand.size>85)s=-6;       // 张开→排斥
+    else if(hand.size<25)s=12;  // 握拳→强力吸引
+    else if(hand.size<40)s=18;  // 紧握→超强吸引
+    atrs.push({x:hand.x,y:hand.y,s:s});
+  }
+
+  while(pts.length<Math.floor(W*H/8000))pts.push(new Pt());
+  for(var i=0;i<pts.length;i++)pts[i].up(sw,atrs);
+  var al=[];for(var i=0;i<pts.length;i++){if(pts[i].l>0)al.push(pts[i])}pts=al;
+
+  ctx.clearRect(0,0,W,H);ctx.fillStyle="#000";ctx.fillRect(0,0,W,H);
+  for(var i=0;i<pts.length;i++)pts[i].dr(ctx);
+
+  // 绘制手部位置光标
+  if(handDetected&&hand.size>10){
+    ctx.beginPath();ctx.arc(hand.x,hand.y,hand.size/160*W*.4,0,PI2);
+    ctx.strokeStyle="rgba(68,170,255,.4)";ctx.lineWidth=2;ctx.stroke();
+  }
+}
+
+// ============ 启动 ============
+function go(){
+  document.getElementById("btn").classList.add("off");
+  var msg=document.getElementById("msg");msg.textContent="请求摄像头...";
+
+  var vid=document.getElementById("vid");
+  vid.play().catch(function(){});
+  navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}}).then(function(stream){
+    vid.srcObject=stream;
+    vid.play().then(function(){
+      msg.textContent="✅ 就绪 - 伸出手";
+      setTimeout(function(){if(msg.textContent==="✅ 就绪 - 伸出手")msg.style.opacity="0"},2000);
+    }).catch(function(e){msg.textContent="⚠ 播放失败:"+e.message});
+  }).catch(function(e){msg.textContent="⚠ 摄像头:"+e.message});
+}
+
+anim();
+</script>
+</body>
+</html>
