@@ -16,10 +16,12 @@ body{background:#000;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei"
 .st{color:#00e5ff;font-size:15px;letter-spacing:0.5px}
 .er{color:#f46;font-size:13px;margin-top:8px;max-width:300px;text-align:center;display:none}
 #gl{position:fixed;top:20px;left:50%;transform:translateX(-50%);color:#fff;font-size:16px;font-weight:600;letter-spacing:2px;z-index:50;pointer-events:none;text-shadow:0 0 20px rgba(0,229,255,0.7);background:rgba(0,0,0,0.45);padding:8px 22px;border-radius:20px;border:1px solid rgba(255,255,255,0.12);backdrop-filter:blur(8px);transition:all .3s}
-#wi{position:fixed;bottom:36px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;z-index:50;pointer-events:none;opacity:0;transition:opacity .2s;text-shadow:0 0 14px rgba(255,220,150,0.9)}
+#wi{position:fixed;bottom:36px;left:50%;transform:translateX(-50%);color:#ffd080;font-size:13px;z-index:50;pointer-events:none;opacity:0;transition:opacity .2s;text-shadow:0 0 14px rgba(255,200,100,0.9)}
 #wi.on{opacity:1}
 #db{position:fixed;right:16px;top:50%;transform:translateY(-50%);width:4px;height:100px;background:rgba(0,229,255,0.12);border-radius:2px;z-index:50;pointer-events:none;overflow:hidden}
 #dbf{position:absolute;bottom:0;width:100%;background:linear-gradient(to top,#00e5ff,#8844ff);border-radius:2px;transition:height .15s ease-out;box-shadow:0 0 8px rgba(0,200,255,0.5)}
+#dm{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:50;padding:10px 28px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;font-size:13px;letter-spacing:1px;border-radius:20px;cursor:pointer;transition:all .3s;display:none}
+#dm:hover{background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.3)}
 </style>
 </head>
 <body>
@@ -29,6 +31,7 @@ body{background:#000;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei"
 <div id="gl">✨ 张开手掌 · 球体</div>
 <div id="wi">挥手风暴</div>
 <div id="db"><div id="dbf"></div></div>
+<button id="dm" onclick="window._demoToggle()">🎬 演示模式</button>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
@@ -37,73 +40,44 @@ body{background:#000;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei"
 </script>
 <script type="module">
 import * as THREE from "three";
-// ===== CONFIG =====
 const C={
-  SN:16000, TN:4000, R:2.8, sK:0.038, damp:0.11, eF:0.65, eD:1.2,
-  wTh:1.2, wF:0.05, wR:3.8, dsMin:0.7, dsMax:2.4, dsS:0.08,
-  idle:0.0008, cF:3, trLife:1.5, trGrav:0.3, trEmRate:0.7
+  SN:12000,TN:8000,R:2.8,sK:0.038,damp:0.11,eF:0.65,eD:1.2,
+  wTh:1.2,wF:0.05,wR:3.8,dsMin:0.7,dsMax:2.4,dsS:0.08,
+  idle:0.0008,cF:3,trLife:2.2,trGrav:0.2,trEmBase:3,trEmMul:6
 };
-const SN=C.SN, TN=C.TN, PN=SN+TN;
-
-// ===== DOM =====
+const SN=C.SN,TN=C.TN,PN=SN+TN;
 const c3=document.getElementById("c"),vid=document.getElementById("v");
 const ov=document.getElementById("ov"),st=ov.querySelector(".st"),er=document.getElementById("er");
 const gl=document.getElementById("gl"),wi=document.getElementById("wi"),dbf=document.getElementById("dbf");
+const dm=document.getElementById("dm");
 
-// ===== THREE.JS =====
 const rdr=new THREE.WebGLRenderer({canvas:c3,antialias:true,alpha:false});
-rdr.setPixelRatio(Math.min(devicePixelRatio,2));rdr.setSize(innerWidth,innerHeight);
-rdr.setClearColor(0x000610,1);
+rdr.setPixelRatio(Math.min(devicePixelRatio,2));rdr.setSize(innerWidth,innerHeight);rdr.setClearColor(0x000510,1);
 const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.3,25);
 cam.position.set(0,0.3,6.5);cam.lookAt(0,0,0);
 
-// BG particles (ambient)
-const bgG=new THREE.BufferGeometry(),bgN=300,bgP_=new Float32Array(bgN*3);
+// BG stars
+const bgG=new THREE.BufferGeometry(),bgN=200,bgP_=new Float32Array(bgN*3);
 for(let i=0;i<bgN;i++){bgP_[i*3]=(Math.random()-0.5)*16;bgP_[i*3+1]=(Math.random()-0.5)*12;bgP_[i*3+2]=-4-Math.random()*8}
 bgG.setAttribute("position",new THREE.BufferAttribute(bgP_,3));
 const bgM_=new THREE.PointsMaterial({color:0x002244,size:0.04,transparent:true,opacity:0.5,blending:THREE.AdditiveBlending,depthWrite:false});
 const bgS_=new THREE.Points(bgG,bgM_);sc.add(bgS_);
 
-// ===== CUSTOM SHADER for glow particles =====
-const vs=/*glsl*/`
-attribute float aSize;attribute float aAlpha;attribute vec3 aColor;
+// CUSTOM GLOW SHADER
+const vs=`attribute float aSize;attribute float aAlpha;attribute vec3 aColor;
 varying float vAlpha;varying vec3 vColor;
-void main(){
-  vec4 mv=modelViewMatrix*vec4(position,1.0);
-  gl_PointSize=aSize*(280.0/-mv.z);
-  gl_Position=projectionMatrix*mv;
-  vAlpha=aAlpha;vColor=aColor;
-}`;
+void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_PointSize=aSize*(300.0/-mv.z);gl_Position=projectionMatrix*mv;vAlpha=aAlpha;vColor=aColor;}`;
+const fs=`varying float vAlpha;varying vec3 vColor;
+void main(){float d=length(gl_PointCoord-0.5)*2.0;float a=1.0-smoothstep(0.0,1.0,d);a=pow(a,2.0);float g=exp(-d*2.0)*0.55;float aa=(a+g)*vAlpha;gl_FragColor=vec4(vColor*1.4,aa);}`;
+const shdMat=new THREE.ShaderMaterial({vertexShader:vs,fragmentShader:fs,transparent:true,depthWrite:false,depthTest:true,blending:THREE.AdditiveBlending});
 
-const fs=/*glsl*/`
-varying float vAlpha;varying vec3 vColor;
-void main(){
-  float d=length(gl_PointCoord-0.5)*2.0;
-  float a=1.0-smoothstep(0.0,1.0,d);
-  a=pow(a,1.8);
-  float glow=exp(-d*2.5)*0.4;
-  float aa=(a+glow)*vAlpha;
-  gl_FragColor=vec4(vColor*1.3,aa);
-}`;
-
-const shdMat=new THREE.ShaderMaterial({
-  vertexShader:vs,fragmentShader:fs,
-  uniforms:{},
-  transparent:true,depthWrite:false,depthTest:true,
-  blending:THREE.AdditiveBlending,
-});
-
-// ===== PARTICLE ARRAYS =====
+// PARTICLE ARRAYS
 const pX=new Float32Array(PN),pY=new Float32Array(PN),pZ=new Float32Array(PN);
 const vX=new Float32Array(PN),vY=new Float32Array(PN),vZ=new Float32Array(PN);
 const aX=new Float32Array(PN),aY=new Float32Array(PN),aZ=new Float32Array(PN);
 const tX=new Float32Array(SN),tY=new Float32Array(SN),tZ=new Float32Array(SN);
-const life=new Float32Array(PN); // 0=shape(always 1), trail: 0-1 remaining
-const maxLife=new Float32Array(PN);
-
-const pos=new Float32Array(PN*3),col=new Float32Array(PN*3);
-const sz=new Float32Array(PN),al=new Float32Array(PN);
-
+const life=new Float32Array(PN),maxLife=new Float32Array(PN);
+const pos=new Float32Array(PN*3),col=new Float32Array(PN*3),sz=new Float32Array(PN),al=new Float32Array(PN);
 const pG=new THREE.BufferGeometry();
 pG.setAttribute("position",new THREE.BufferAttribute(pos,3));
 pG.setAttribute("aSize",new THREE.BufferAttribute(sz,1));
@@ -111,7 +85,11 @@ pG.setAttribute("aAlpha",new THREE.BufferAttribute(al,1));
 pG.setAttribute("aColor",new THREE.BufferAttribute(col,3));
 const pSys=new THREE.Points(pG,shdMat);sc.add(pSys);
 
-// ===== SHAPES =====
+// FINGER COLORS - vivid palette
+const fCols=[[1,0.45,0.05],[0.08,0.95,1],[1,0.15,0.55],[0.15,1,0.4],[0.7,0.2,1]];
+// thumb=orange, index=cyan, middle=hotpink, ring=green, pinky=purple
+
+// SHAPES
 function genSphere(n){const pts=new Float32Array(n*3),phi=Math.PI*(3-Math.sqrt(5)),R=C.R;
 for(let i=0;i<n;i++){const y=1-(i/(n-1))*2,rY=Math.sqrt(1-y*y),th=phi*i;
 pts[i*3]=Math.cos(th)*rY*R;pts[i*3+1]=y*R;pts[i*3+2]=Math.sin(th)*rY*R}return pts}
@@ -124,8 +102,7 @@ for(let y=0;y<160;y+=2)for(let x=0;x<512;x+=2)if(d[(y*512+x)*4]>128)w.push({x,y}
 const pts=new Float32Array(n*3);if(w.length===0)return genSphere(n);
 const sx=C.R*2.2/512,sy=C.R*0.9/160,cx=256,cy=80;
 for(let i=0;i<n;i++){const p=w[i%w.length];
-pts[i*3]=(p.x+(Math.random()-.5)*2-cx)*sx;pts[i*3+1]=(cy-(p.y+(Math.random()-.5)*2))*sy;
-pts[i*3+2]=(Math.random()-.5)*.3}return pts}
+pts[i*3]=(p.x+(Math.random()-.5)*2-cx)*sx;pts[i*3+1]=(cy-(p.y+(Math.random()-.5)*2))*sy;pts[i*3+2]=(Math.random()-.5)*.3}return pts}
 function genRing(n){const pts=new Float32Array(n*3),R=C.R*.75,r=C.R*.15;
 for(let i=0;i<n;i++){const u=Math.random()*Math.PI*2,v=Math.random()*Math.PI*2;
 pts[i*3]=(R+r*Math.cos(v))*Math.cos(u);pts[i*3+1]=r*Math.sin(v)*1.5;pts[i*3+2]=(R+r*Math.cos(v))*Math.sin(u)}return pts}
@@ -137,25 +114,17 @@ for(let i=0;i<n;i++){const t=Math.random()*Math.PI*2,x=16*Math.pow(Math.sin(t),3
 pts[i*3]=x*s+(Math.random()-.5)*.08;pts[i*3+1]=y*s+(Math.random()-.5)*.08;pts[i*3+2]=(Math.random()-.5)*.35}return pts}
 const shapes={open:genSphere(SN),scissors:genText(SN),fist:genRing(SN),point:genStar(SN),thumbsUp:genHeart(SN)};
 
-// ===== FINGER COLORS (rich palette) =====
-const fingerColors=[
-  [1.0,0.55,0.1],[0.1,0.95,1.0],[1.0,0.25,0.7],[0.2,1.0,0.5],[0.8,0.3,1.0]
-]; // thumb=gold, index=cyan, middle=pink, ring=green, pinky=purple
-
-// ===== INIT SHAPE PARTICLES =====
+// INIT SHAPE PARTICLES
 (function(){const t=shapes.open;
 for(let i=0;i<SN;i++){const r=C.R*(0.8+Math.random()*0.4),th=Math.random()*Math.PI*2,ph=Math.acos(2*Math.random()-1);
 pX[i]=Math.sin(ph)*Math.cos(th)*r;pY[i]=Math.sin(ph)*Math.sin(th)*r;pZ[i]=Math.cos(ph)*r;
 vX[i]=vY[i]=vZ[i]=0;aX[i]=aY[i]=aZ[i]=0;tX[i]=t[i*3];tY[i]=t[i*3+1];tZ[i]=t[i*3+2];
-col[i*3]=0;col[i*3+1]=0.9;col[i*3+2]=1;sz[i]=1.0;al[i]=0.85;life[i]=1;maxLife[i]=1}})();
+col[i*3]=0;col[i*3+1]=0.9;col[i*3+2]=1;sz[i]=1.2;al[i]=0.9;life[i]=1;maxLife[i]=1}})();
+// INIT TRAIL (dead)
+for(let i=SN;i<PN;i++){pX[i]=0;pY[i]=0;pZ[i]=0;vX[i]=vY[i]=vZ[i]=0;
+life[i]=0;maxLife[i]=C.trLife*(0.5+Math.random());sz[i]=0.3+Math.random()*0.8;al[i]=0}
 
-// ===== INIT TRAIL PARTICLES (dead) =====
-for(let i=SN;i<PN;i++){
-  pX[i]=0;pY[i]=0;pZ[i]=0;vX[i]=vY[i]=vZ[i]=0;aX[i]=aY[i]=aZ[i]=0;
-  col[i*3]=1;col[i*3+1]=1;col[i*3+2]=1;sz[i]=0.6;al[i]=0;life[i]=0;maxLife[i]=C.trLife;
-}
-
-// ===== GESTURE DETECTION =====
+// GESTURE
 function d3(a,b){const dx=a.x-b.x,dy=a.y-b.y,dz=(a.z||0)-(b.z||0);return Math.hypot(dx,dy,dz)}
 function fUp(lm,tip,pip,mcp){const dt=d3(lm[tip],lm[mcp]),dp=d3(lm[pip],lm[mcp]);return dt>dp*1.05&&lm[tip].y<lm[mcp].y}
 function tUp(lm){const dt=d3(lm[4],lm[0]),dm=d3(lm[2],lm[0]);return dt>dm*1.1}
@@ -166,105 +135,104 @@ if(iU&&mU&&!rU&&!pU)return"scissors";if(iU&&!mU&&!rU&&!pU&&!tU_)return"point";
 if(tU_&&!iU&&!mU&&!rU&&!pU)return"thumbsUp";return null}
 const gNames={open:"✨ 张开手掌 · 球体",scissors:"✌️ 剪刀手 · 我是 Mok",fist:"✊ 握拳 · 圆环",point:"☝️ 食指 · 星形",thumbsUp:"👍 拇指 · 爱心"};
 
-// ===== STATE =====
-let curG="open",pendG=null,pendF=0,expT=0,ds=1,tds=1,detected=false;
-let hcX=0,hcY=0,smoothSpd=0,lastPalm=null,lastPalmT=0;
-let trailIdx=SN; // next trail particle to spawn
+// STATE
+let curG="open",pendG=null,pendF=0,expT=0,ds=1,tds=1,detected=false,demoMode=false;
+let hcX=0,hcY=0,smoothSpd=0,lastPalm=null,lastPalmT=0,trailIdx=SN;
+let demoT=0,demoPts=[],demoSpd=0;
 
-// ===== FINGERTIP TRAIL SPAWN =====
-const fingerTips=[4,8,12,16,20]; // landmark indices for fingertips
-
-function spawnTrail(x,y,z,vx,vy,vz,colorIdx){
-  const i=trailIdx;
-  pX[i]=x;pY[i]=y;pZ[i]=z;
-  vX[i]=vx+(Math.random()-.5)*0.3;vY[i]=vy+(Math.random()-.5)*0.3;vZ[i]=vz+(Math.random()-.5)*0.2;
+// TRAIL SPAWN (much more aggressive emission)
+const fTips=[4,8,12,16,20];
+function spawnTrail(x,y,z,vx,vy,vz,ci){
+  const i=trailIdx;pX[i]=x;pY[i]=y;pZ[i]=z;
+  vX[i]=vx+(Math.random()-.5)*0.5;vY[i]=vy+(Math.random()-.5)*0.4-0.05;vZ[i]=vz+(Math.random()-.5)*0.3;
   life[i]=1;maxLife[i]=C.trLife*(0.6+Math.random()*0.8);
-  const fc=fingerColors[colorIdx%5];
-  col[i*3]=fc[0];col[i*3+1]=fc[1];col[i*3+2]=fc[2];
-  sz[i]=0.4+Math.random()*0.5;al[i]=0.9;
+  const fc=fCols[ci%5];col[i*3]=fc[0];col[i*3+1]=fc[1];col[i*3+2]=fc[2];
+  sz[i]=0.2+Math.random()*1.2;al[i]=0.85+Math.random()*0.15;
   trailIdx++;if(trailIdx>=PN)trailIdx=SN;
 }
-
 function emitTrails(lm,hSpd){
-  const rate=hSpd*C.trEmRate+0.5; // base + speed-based
+  const rate=C.trEmBase+hSpd*C.trEmMul; // 3 + speed*6 = very visible even when still
   const count=Math.floor(rate);
   for(let f=0;f<5;f++){
-    const tip=lm[fingerTips[f]];
-    const tx=(tip.x-0.5)*C.R*2.5,ty=(0.5-tip.y)*C.R*2.5,tz=tip.z*C.R*1.5;
-    for(let j=0;j<count;j++){
-      spawnTrail(tx,ty,tz,
-        (Math.random()-.5)*0.15,(Math.random()-.5)*0.1-0.05,(Math.random()-.5)*0.1,f);
-    }
+    const tip=lm[fTips[f]],tx=(tip.x-0.5)*C.R*2.5,ty=(0.5-tip.y)*C.R*2.5,tz=tip.z*C.R*1.5;
+    for(let j=0;j<count;j++)spawnTrail(tx,ty,tz,(Math.random()-.5)*0.25,(Math.random()-.5)*0.15-0.08,(Math.random()-.5)*0.15,f);
   }
 }
 
-// ===== EXPLOSION =====
+// DEMO MODE - simulate hand movement
+function demoSim(dt){
+  demoT+=dt;
+  // Simulate a hand moving in figure-8
+  const tx=Math.sin(demoT*0.7)*C.R*1.5,ty=Math.cos(demoT*0.5)*C.R*1.0;
+  const px=Math.sin((demoT-0.05)*0.7)*C.R*1.5,py=Math.cos((demoT-0.05)*0.5)*C.R*1.0;
+  const spd=Math.hypot(tx-px,ty-py)/0.05;
+  demoSpd=demoSpd*0.85+spd*0.15;
+  hcX=tx;hcY=ty;smoothSpd=demoSpd;
+  // Emit trails from 5 virtual fingertip positions
+  for(let f=0;f<5;f++){
+    const a=demoT*1.3+f*1.2,ox=Math.cos(a)*0.4,oy=Math.sin(a)*0.3;
+    const fx=tx+ox,fy=ty+oy;
+    const ec=Math.floor(C.trEmBase+demoSpd*C.trEmMul);
+    for(let j=0;j<ec;j++)spawnTrail(fx,fy,(Math.random()-.5)*0.3,(Math.random()-.5)*0.3,(Math.random()-.5)*0.2-0.08,(Math.random()-.5)*0.2,f);
+  }
+  // Cycle gestures every 4 seconds
+  const gs=["open","scissors","fist","point","thumbsUp"];
+  const gi=Math.floor(demoT/4)%gs.length,gn=gs[gi];
+  if(gn!==curG){curG=gn;setShape(curG);explode();gl.textContent=gNames[curG]||curG}
+  tds=1+Math.sin(demoT*0.8)*0.5;
+  detected=true;
+}
+window._demoToggle=function(){demoMode=!demoMode;dm.textContent=demoMode?"🎬 演示中...(点击停止)":"🎬 演示模式";if(!demoMode){curG="open";setShape(curG);explode();gl.textContent=gNames[curG];detected=false;smoothSpd=0;tds=1}}
+
+// EXPLOSION + SHAPE
 function explode(){expT=C.eD;const f=C.eF;
 for(let i=0;i<SN;i++){const dx=pX[i],dy=pY[i],dz=pZ[i],d=Math.sqrt(dx*dx+dy*dy+dz*dz)+.001;
 const ff=f*(.6+Math.random()*.8);vX[i]+=(dx/d)*ff+(Math.random()-.5)*f;vY[i]+=(dy/d)*ff+(Math.random()-.5)*f;vZ[i]+=(dz/d)*ff+(Math.random()-.5)*f}}
+function setShape(g){const t=shapes[g]||shapes.open;for(let i=0;i<SN;i++){tX[i]=t[i*3];tY[i]=t[i*3+1];tZ[i]=t[i*3+2]}}
 
-function setShape(g){const t=shapes[g]||shapes.open;
-for(let i=0;i<SN;i++){tX[i]=t[i*3];tY[i]=t[i*3+1];tZ[i]=t[i*3+2]}}
-
-// ===== PHYSICS =====
+// PHYSICS
 function phys(dt){const dtc=Math.min(dt,.1),k=C.sK,d=C.damp;
-// Shape particles (0 to SN-1): spring-damper to target
 for(let i=0;i<SN;i++){aX[i]=(tX[i]-pX[i])*k;aY[i]=(tY[i]-pY[i])*k;aZ[i]=(tZ[i]-pZ[i])*k;
 aX[i]-=vX[i]*d;aY[i]-=vY[i]*d;aZ[i]-=vZ[i]*d;
-if(!detected){aX[i]+=(Math.random()-.5)*C.idle*60;aY[i]+=(Math.random()-.5)*C.idle*60;aZ[i]+=(Math.random()-.5)*C.idle*60}
+if(!detected&&!demoMode){aX[i]+=(Math.random()-.5)*C.idle*60;aY[i]+=(Math.random()-.5)*C.idle*60;aZ[i]+=(Math.random()-.5)*C.idle*60}
 vX[i]+=aX[i]*dtc;vY[i]+=aY[i]*dtc;vZ[i]+=aZ[i]*dtc;pX[i]+=vX[i]*dtc;pY[i]+=vY[i]*dtc;pZ[i]+=vZ[i]*dtc}
-// Trail particles (SN to PN-1): gravity + drag + life decay
-for(let i=SN;i<PN;i++){if(life[i]<=0)continue;
-vY[i]-=C.trGrav*dtc;vX[i]*=0.98;vY[i]*=0.98;vZ[i]*=0.98;
-pX[i]+=vX[i]*dtc;pY[i]+=vY[i]*dtc;pZ[i]+=vZ[i]*dtc;
-life[i]-=dtc/maxLife[i];al[i]=life[i]*0.85;
-if(life[i]<=0){al[i]=0;pX[i]=0;pY[i]=0;pZ[i]=0}}}
+for(let i=SN;i<PN;i++){if(life[i]<=0)continue;vY[i]-=C.trGrav*dtc;vX[i]*=0.975;vY[i]*=0.975;vZ[i]*=0.975;
+pX[i]+=vX[i]*dtc;pY[i]+=vY[i]*dtc;pZ[i]+=vZ[i]*dtc;life[i]-=dtc/maxLife[i];al[i]=life[i]*0.9;if(life[i]<=0){al[i]=0}}}
 
-// ===== WAVE =====
+// WAVE
 function applyWind(dt){if(!detected||smoothSpd<C.wTh)return;
 const dtc=Math.min(dt,.1),f=smoothSpd*C.wF,mR=C.wR;
 for(let i=0;i<SN;i++){const dx=pX[i]-hcX,dy=pY[i]-hcY,dz=pZ[i],d=Math.sqrt(dx*dx+dy*dy+dz*dz)+.01;
 if(d<mR){const fall=1-d/mR,ff=f*fall*fall*dtc*60;vX[i]+=(dx/d)*ff;vY[i]+=(dy/d)*ff;vZ[i]+=(dz/d)*ff}}}
 
-// ===== BUFFERS =====
-function bufUpd(){for(let i=0;i<PN;i++){pos[i*3]=pX[i];pos[i*3+1]=pY[i];pos[i*3+2]=pZ[i]}
+// BUFFERS
+function bufUpd(){
+for(let i=0;i<PN;i++){pos[i*3]=pX[i];pos[i*3+1]=pY[i];pos[i*3+2]=pZ[i]}
 pG.attributes.position.needsUpdate=true;pG.attributes.aAlpha.needsUpdate=true;
-// Explosion color for shape particles
 if(expT>0){const t=Math.min(expT/C.eD,1),ease=1-Math.pow(1-t,3);
-for(let i=0;i<SN;i++){col[i*3]=1+(0-1)*ease;col[i*3+1]=0.95+(0.9-0.95)*ease;col[i*3+2]=0.7+(1-0.7)*ease}
-pG.attributes.aColor.needsUpdate=true}
-else if(expT<=0&&detected){for(let i=0;i<SN;i++){col[i*3]=0;col[i*3+1]=0.9;col[i*3+2]=1}}
-// Trail colors set at spawn time, just copy to buffer (already done) + explosion flash
+for(let i=0;i<SN;i++){col[i*3]=1+(0-1)*ease;col[i*3+1]=0.95+(0.9-0.95)*ease;col[i*3+2]=0.7+(1-0.7)*ease}}
+else if(!expT&&detected){for(let i=0;i<SN;i++){col[i*3]=0;col[i*3+1]=0.9;col[i*3+2]=1}}
 pG.attributes.aColor.needsUpdate=true}
 
-// ===== HAND PROCESSING =====
+// HAND PROCESSING
 function procHand(lm){
+  if(demoMode)return;
   detected=true;
-  // Depth
-  const xs=lm.map(p=>p.x),ys=lm.map(p=>p.y);
-  const area=(Math.max(...xs)-Math.min(...xs))*(Math.max(...ys)-Math.min(...ys));
+  const xs=lm.map(p=>p.x),ys=lm.map(p=>p.y),area=(Math.max(...xs)-Math.min(...xs))*(Math.max(...ys)-Math.min(...ys));
   tds=Math.min(C.dsMax,Math.max(C.dsMin,0.8+area*3.5));
-  // Palm
-  const palm={x:0,y:0,z:0},ix=[0,5,9,13,17];
-  ix.forEach(i=>{palm.x+=lm[i].x;palm.y+=lm[i].y;palm.z+=lm[i].z||0});
-  palm.x/=5;palm.y/=5;palm.z/=5;
-  hcX=(palm.x-0.5)*C.R*2.5;hcY=(0.5-palm.y)*C.R*2.5;
-  // Speed
+  const palm={x:0,y:0,z:0},ix=[0,5,9,13,17];ix.forEach(i=>{palm.x+=lm[i].x;palm.y+=lm[i].y;palm.z+=lm[i].z||0});
+  palm.x/=5;palm.y/=5;palm.z/=5;hcX=(palm.x-0.5)*C.R*2.5;hcY=(0.5-palm.y)*C.R*2.5;
   const now=performance.now();
-  if(lastPalm){const dt2=(now-lastPalmT)/1000;
-  if(dt2>0){const dx2=palm.x-lastPalm.x,dy2=palm.y-lastPalm.y;
-  const spd=Math.hypot(dx2,dy2)/dt2;smoothSpd=smoothSpd*.88+spd*.12}}
+  if(lastPalm){const dt2=(now-lastPalmT)/1000;if(dt2>0){const dx2=palm.x-lastPalm.x,dy2=palm.y-lastPalm.y;
+  smoothSpd=smoothSpd*.85+Math.hypot(dx2,dy2)/dt2*.15}}
   lastPalm=palm;lastPalmT=now;
-  // Emit trail particles from fingertips
   emitTrails(lm,smoothSpd);
-  // Gesture
-  const g=classify(lm);
-  if(g===pendG){pendF++}else{pendG=g;pendF=1}
+  const g=classify(lm);if(g===pendG){pendF++}else{pendG=g;pendF=1}
   if(pendG&&pendG!==curG&&pendF>C.cF){curG=pendG;setShape(curG);explode();gl.textContent=gNames[curG]||curG}
 }
-function noHand(){detected=false;smoothSpd*=.9;tds+=(1-tds)*.05;pendG=null;pendF=0}
+function noHand(){if(demoMode)return;detected=false;smoothSpd*=.9;tds+=(1-tds)*.05;pendG=null;pendF=0}
 
-// ===== MEDIAPIPE =====
+// MEDIAPIPE
 let hands=null,camFeed=null;
 async function setupMP(){
   st.textContent="正在下载手势模型...";
@@ -272,26 +240,33 @@ async function setupMP(){
   hands.setOptions({maxNumHands:1,modelComplexity:1,minDetectionConfidence:0.6,minTrackingConfidence:0.5,selfieMode:true});
   hands.onResults(r=>{const h=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(h)procHand(h);else noHand()});
   st.textContent="正在连接摄像头...";
-  const stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}});
-  vid.srcObject=stream;
-  await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(new Error("视频超时")),5000);
-  vid.onloadedmetadata=()=>{clearTimeout(t);vid.play().then(resolve).catch(reject)}});
-  camFeed=new Camera(vid,{onFrame:async()=>{if(hands&&hands.send)await hands.send({image:vid})},width:640,height:480});
-  await camFeed.start();
-  st.textContent="准备就绪";setTimeout(()=>ov.classList.add("hid"),600);
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:"user"}});
+    vid.srcObject=stream;
+    await new Promise((resolve,reject)=>{const t=setTimeout(()=>reject(new Error("视频超时")),5000);
+    vid.onloadedmetadata=()=>{clearTimeout(t);vid.play().then(resolve).catch(reject)}});
+    camFeed=new Camera(vid,{onFrame:async()=>{if(hands&&hands.send)await hands.send({image:vid})},width:640,height:480});
+    await camFeed.start();
+    st.textContent="准备就绪";dm.style.display="block";
+  }catch(e){
+    st.textContent="摄像头不可用，请使用演示模式";
+    dm.style.display="block";
+  }
+  setTimeout(()=>ov.classList.add("hid"),800);
 }
 
-// ===== RENDER LOOP =====
+// RENDER LOOP
 let lastF=performance.now();
 function anim(ts){
   requestAnimationFrame(anim);
   let dt=(ts-lastF)/1000;if(dt<=0)dt=.016;lastF=ts;
+  if(demoMode)demoSim(dt);
   ds+=(tds-ds)*C.dsS;pSys.scale.setScalar(ds);
   if(expT>0){expT-=dt;if(expT<0)expT=0}
   phys(dt);applyWind(dt);bufUpd();
-  if(smoothSpd>C.wTh){wi.classList.add("on");wi.textContent="≈ 挥手风暴 "+(smoothSpd*100).toFixed(0)+"%"}else wi.classList.remove("on");
+  if(smoothSpd>C.wTh){wi.classList.add("on");wi.textContent="≈ 挥手风暴"}else wi.classList.remove("on");
   dbf.style.height=Math.max(5,Math.min(100,((ds-C.dsMin)/(C.dsMax-C.dsMin))*100))+"%";
-  if(detected){cam.position.x+=(hcX*.15-cam.position.x)*.03;cam.position.y+=(hcY*.1+.3-cam.position.y)*.03;cam.lookAt(hcX*.3,hcY*.3,0)}
+  if(detected||demoMode){cam.position.x+=(hcX*.15-cam.position.x)*.03;cam.position.y+=(hcY*.1+.3-cam.position.y)*.03;cam.lookAt(hcX*.3,hcY*.3,0)}
   else{cam.position.x+=(0-cam.position.x)*.02;cam.position.y+=(.3-cam.position.y)*.02;cam.lookAt(0,0,0)}
   bgS_.rotation.y+=dt*.03;bgS_.rotation.x+=dt*.01;rdr.render(sc,cam);
 }
@@ -299,9 +274,9 @@ window.addEventListener("resize",()=>{rdr.setSize(innerWidth,innerHeight);cam.as
 
 (async function(){
   try{await setupMP();requestAnimationFrame(anim)}
-  catch(e){console.error(e);er.textContent="初始化失败: "+e.message;er.style.display="block";st.textContent="启动失败";ov.classList.add("hid");requestAnimationFrame(anim)}
+  catch(e){console.error(e);er.textContent="初始化失败: "+e.message;er.style.display="block";st.textContent="启动失败";dm.style.display="block";ov.classList.add("hid");requestAnimationFrame(anim)}
 })();
-console.log("%c≈ 粒子特效 WebAR v2 %c已就绪 | 指尖光粒子 + 五态手势","color:#00e5ff;font-size:18px;","color:#aaa;");
+console.log("%c≈ 粒子特效 WebAR v3 %c已就绪 | 指尖光轨 + 演示模式","color:#00e5ff;font-size:18px;","color:#aaa;");
 </script>
 </body>
 </html>
